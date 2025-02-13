@@ -283,8 +283,9 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
         audio_data = audio_file.read()
         audio_hash = hashlib.md5(audio_data).hexdigest()
 
-    global _ref_audio_cache
-    if audio_hash in _ref_audio_cache:
+    global _ref_audio_cache 
+    a=0
+    if audio_hash in _ref_audio_cache and a==1:
         # Use cached reference text
         show_info("Using cached reference text...")
         ref_text = _ref_audio_cache[audio_hash]
