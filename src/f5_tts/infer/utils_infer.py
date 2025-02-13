@@ -183,7 +183,7 @@ def load_model(
     model_cfg,
     ckpt_path,
     mel_spec_type=mel_spec_type,
-    vocab_file=str(cached_path("hf://IbrahimSalah/F5-TTS-Arabic/model_235000.pt")),
+    vocab_file=str(cached_path("hf://IbrahimSalah/F5-TTS-Arabic/vocab.txt")),
     ode_method=ode_method,
     use_ema=True,
     device=device,
