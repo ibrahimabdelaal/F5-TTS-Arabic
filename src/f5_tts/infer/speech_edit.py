@@ -1,7 +1,5 @@
 import os
 
-os.environ["PYTOCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
-
 import torch
 import torch.nn.functional as F
 import torchaudio
@@ -10,15 +8,7 @@ from f5_tts.infer.utils_infer import load_checkpoint, load_vocoder, save_spectro
 from f5_tts.model import CFM, DiT, UNetT
 from f5_tts.model.utils import convert_char_to_pinyin, get_tokenizer
 
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "xpu"
-    if torch.xpu.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
+device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 
 # --------------------- Dataset Settings -------------------- #
@@ -189,13 +179,13 @@ with torch.inference_mode():
     generated = generated[:, ref_audio_len:, :]
     gen_mel_spec = generated.permute(0, 2, 1)
     if mel_spec_type == "vocos":
-        generated_wave = vocoder.decode(gen_mel_spec).cpu()
+        generated_wave = vocoder.decode(gen_mel_spec)
     elif mel_spec_type == "bigvgan":
-        generated_wave = vocoder(gen_mel_spec).squeeze(0).cpu()
+        generated_wave = vocoder(gen_mel_spec)
 
     if rms < target_rms:
         generated_wave = generated_wave * rms / target_rms
 
     save_spectrogram(gen_mel_spec[0].cpu().numpy(), f"{output_dir}/speech_edit_out.png")
-    torchaudio.save(f"{output_dir}/speech_edit_out.wav", generated_wave, target_sample_rate)
+    torchaudio.save(f"{output_dir}/speech_edit_out.wav", generated_wave.squeeze(0).cpu(), target_sample_rate)
     print(f"Generated wav: {generated_wave.shape}")

@@ -1,14 +1,13 @@
-import argparse
-import gc
 import socket
 import struct
 import torch
 import torchaudio
-import traceback
-from importlib.resources import files
 from threading import Thread
 
-from cached_path import cached_path
+
+import gc
+import traceback
+
 
 from infer.utils_infer import infer_batch_process, preprocess_ref_audio_text, load_vocoder, load_model
 from model.backbones.dit import DiT
@@ -16,15 +15,7 @@ from model.backbones.dit import DiT
 
 class TTSStreamingProcessor:
     def __init__(self, ckpt_file, vocab_file, ref_audio, ref_text, device=None, dtype=torch.float32):
-        self.device = device or (
-            "cuda"
-            if torch.cuda.is_available()
-            else "xpu"
-            if torch.xpu.is_available()
-            else "mps"
-            if torch.backends.mps.is_available()
-            else "cpu"
-        )
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         # Load the model using the provided checkpoint and vocab files
         self.model = load_model(
@@ -83,11 +74,6 @@ class TTSStreamingProcessor:
         # Break the generated audio into chunks and send them
         chunk_size = int(final_sample_rate * play_steps_in_s)
 
-        if len(audio_chunk) < chunk_size:
-            packed_audio = struct.pack(f"{len(audio_chunk)}f", *audio_chunk)
-            yield packed_audio
-            return
-
         for i in range(0, len(audio_chunk), chunk_size):
             chunk = audio_chunk[i : i + chunk_size]
 
@@ -95,10 +81,19 @@ class TTSStreamingProcessor:
             if i + chunk_size >= len(audio_chunk):
                 chunk = audio_chunk[i:]
 
-            # Send the chunk if it is not empty
-            if len(chunk) > 0:
-                packed_audio = struct.pack(f"{len(chunk)}f", *chunk)
-                yield packed_audio
+            # Avoid sending empty or repeated chunks
+            if len(chunk) == 0:
+                break
+
+            # Pack and send the audio chunk
+            packed_audio = struct.pack(f"{len(chunk)}f", *chunk)
+            yield packed_audio
+
+        # Ensure that no final word is repeated by not resending partial chunks
+        if len(audio_chunk) % chunk_size != 0:
+            remaining_chunk = audio_chunk[-(len(audio_chunk) % chunk_size) :]
+            packed_audio = struct.pack(f"{len(remaining_chunk)}f", *remaining_chunk)
+            yield packed_audio
 
 
 def handle_client(client_socket, processor):
@@ -146,51 +141,23 @@ def start_server(host, port, processor):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", default=9998)
-
-    parser.add_argument(
-        "--ckpt_file",
-        default=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors")),
-        help="Path to the model checkpoint file",
-    )
-    parser.add_argument(
-        "--vocab_file",
-        default="",
-        help="Path to the vocab file if customized",
-    )
-
-    parser.add_argument(
-        "--ref_audio",
-        default=str(files("f5_tts").joinpath("infer/examples/basic/basic_ref_en.wav")),
-        help="Reference audio to provide model with speaker characteristics",
-    )
-    parser.add_argument(
-        "--ref_text",
-        default="",
-        help="Reference audio subtitle, leave empty to auto-transcribe",
-    )
-
-    parser.add_argument("--device", default=None, help="Device to run the model on")
-    parser.add_argument("--dtype", default=torch.float32, help="Data type to use for model inference")
-
-    args = parser.parse_args()
-
     try:
+        # Load the model and vocoder using the provided files
+        ckpt_file = ""  # pointing your checkpoint "ckpts/model/model_1096.pt"
+        vocab_file = ""  # Add vocab file path if needed
+        ref_audio = ""  # add ref audio"./tests/ref_audio/reference.wav"
+        ref_text = ""
+
         # Initialize the processor with the model and vocoder
         processor = TTSStreamingProcessor(
-            ckpt_file=args.ckpt_file,
-            vocab_file=args.vocab_file,
-            ref_audio=args.ref_audio,
-            ref_text=args.ref_text,
-            device=args.device,
-            dtype=args.dtype,
+            ckpt_file=ckpt_file,
+            vocab_file=vocab_file,
+            ref_audio=ref_audio,
+            ref_text=ref_text,
+            dtype=torch.float32,
         )
 
         # Start the server
-        start_server(args.host, args.port, processor)
-
+        start_server("0.0.0.0", 9998, processor)
     except KeyboardInterrupt:
         gc.collect()

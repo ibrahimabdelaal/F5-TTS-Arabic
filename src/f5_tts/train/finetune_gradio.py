@@ -26,12 +26,11 @@ from datasets import Dataset as Dataset_
 from datasets.arrow_writer import ArrowWriter
 from safetensors.torch import save_file
 from scipy.io import wavfile
+from transformers import pipeline
 from cached_path import cached_path
 from f5_tts.api import F5TTS
 from f5_tts.model.utils import convert_char_to_pinyin
-from f5_tts.infer.utils_infer import transcribe
 from importlib.resources import files
-
 
 training_process = None
 system = platform.system()
@@ -44,17 +43,11 @@ last_ema = None
 
 path_data = str(files("f5_tts").joinpath("../../data"))
 path_project_ckpts = str(files("f5_tts").joinpath("../../ckpts"))
-file_train = str(files("f5_tts").joinpath("train/finetune_cli.py"))
+file_train = "src/f5_tts/train/finetune_cli.py"
 
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "xpu"
-    if torch.xpu.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
+device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+pipe = None
 
 
 # Save settings from a JSON file
@@ -70,15 +63,13 @@ def save_settings(
     epochs,
     num_warmup_updates,
     save_per_updates,
-    keep_last_n_checkpoints,
-    last_per_updates,
+    last_per_steps,
     finetune,
     file_checkpoint_train,
     tokenizer_type,
     tokenizer_file,
     mixed_precision,
     logger,
-    ch_8bit_adam,
 ):
     path_project = os.path.join(path_project_ckpts, project_name)
     os.makedirs(path_project, exist_ok=True)
@@ -95,15 +86,13 @@ def save_settings(
         "epochs": epochs,
         "num_warmup_updates": num_warmup_updates,
         "save_per_updates": save_per_updates,
-        "keep_last_n_checkpoints": keep_last_n_checkpoints,
-        "last_per_updates": last_per_updates,
+        "last_per_steps": last_per_steps,
         "finetune": finetune,
         "file_checkpoint_train": file_checkpoint_train,
         "tokenizer_type": tokenizer_type,
         "tokenizer_file": tokenizer_file,
         "mixed_precision": mixed_precision,
         "logger": logger,
-        "bnb_optimizer": ch_8bit_adam,
     }
     with open(file_setting, "w") as f:
         json.dump(settings, f, indent=4)
@@ -116,56 +105,68 @@ def load_settings(project_name):
     path_project = os.path.join(path_project_ckpts, project_name)
     file_setting = os.path.join(path_project, "setting.json")
 
-    # Default settings
-    default_settings = {
-        "exp_name": "F5TTS_Base",
-        "learning_rate": 1e-05,
-        "batch_size_per_gpu": 1000,
-        "batch_size_type": "frame",
-        "max_samples": 64,
-        "grad_accumulation_steps": 1,
-        "max_grad_norm": 1,
-        "epochs": 100,
-        "num_warmup_updates": 2,
-        "save_per_updates": 300,
-        "keep_last_n_checkpoints": -1,
-        "last_per_updates": 100,
-        "finetune": True,
-        "file_checkpoint_train": "",
-        "tokenizer_type": "pinyin",
-        "tokenizer_file": "",
-        "mixed_precision": "none",
-        "logger": "wandb",
-        "bnb_optimizer": False,
-    }
+    if not os.path.isfile(file_setting):
+        settings = {
+            "exp_name": "F5TTS_Base",
+            "learning_rate": 1e-05,
+            "batch_size_per_gpu": 1000,
+            "batch_size_type": "frame",
+            "max_samples": 64,
+            "grad_accumulation_steps": 1,
+            "max_grad_norm": 1,
+            "epochs": 100,
+            "num_warmup_updates": 2,
+            "save_per_updates": 300,
+            "last_per_steps": 100,
+            "finetune": True,
+            "file_checkpoint_train": "",
+            "tokenizer_type": "pinyin",
+            "tokenizer_file": "",
+            "mixed_precision": "none",
+            "logger": "wandb",
+        }
+        return (
+            settings["exp_name"],
+            settings["learning_rate"],
+            settings["batch_size_per_gpu"],
+            settings["batch_size_type"],
+            settings["max_samples"],
+            settings["grad_accumulation_steps"],
+            settings["max_grad_norm"],
+            settings["epochs"],
+            settings["num_warmup_updates"],
+            settings["save_per_updates"],
+            settings["last_per_steps"],
+            settings["finetune"],
+            settings["file_checkpoint_train"],
+            settings["tokenizer_type"],
+            settings["tokenizer_file"],
+            settings["mixed_precision"],
+            settings["logger"],
+        )
 
-    # Load settings from file if it exists
-    if os.path.isfile(file_setting):
-        with open(file_setting, "r") as f:
-            file_settings = json.load(f)
-        default_settings.update(file_settings)
-
-    # Return as a tuple in the correct order
+    with open(file_setting, "r") as f:
+        settings = json.load(f)
+        if "logger" not in settings:
+            settings["logger"] = "wandb"
     return (
-        default_settings["exp_name"],
-        default_settings["learning_rate"],
-        default_settings["batch_size_per_gpu"],
-        default_settings["batch_size_type"],
-        default_settings["max_samples"],
-        default_settings["grad_accumulation_steps"],
-        default_settings["max_grad_norm"],
-        default_settings["epochs"],
-        default_settings["num_warmup_updates"],
-        default_settings["save_per_updates"],
-        default_settings["keep_last_n_checkpoints"],
-        default_settings["last_per_updates"],
-        default_settings["finetune"],
-        default_settings["file_checkpoint_train"],
-        default_settings["tokenizer_type"],
-        default_settings["tokenizer_file"],
-        default_settings["mixed_precision"],
-        default_settings["logger"],
-        default_settings["bnb_optimizer"],
+        settings["exp_name"],
+        settings["learning_rate"],
+        settings["batch_size_per_gpu"],
+        settings["batch_size_type"],
+        settings["max_samples"],
+        settings["grad_accumulation_steps"],
+        settings["max_grad_norm"],
+        settings["epochs"],
+        settings["num_warmup_updates"],
+        settings["save_per_updates"],
+        settings["last_per_steps"],
+        settings["finetune"],
+        settings["file_checkpoint_train"],
+        settings["tokenizer_type"],
+        settings["tokenizer_file"],
+        settings["mixed_precision"],
+        settings["logger"],
     )
 
 
@@ -372,8 +373,7 @@ def start_training(
     epochs=11,
     num_warmup_updates=200,
     save_per_updates=400,
-    keep_last_n_checkpoints=-1,
-    last_per_updates=800,
+    last_per_steps=800,
     finetune=True,
     file_checkpoint_train="",
     tokenizer_type="pinyin",
@@ -381,17 +381,18 @@ def start_training(
     mixed_precision="fp16",
     stream=False,
     logger="wandb",
-    ch_8bit_adam=False,
 ):
-    global training_process, tts_api, stop_signal
+    global training_process, tts_api, stop_signal, pipe
 
-    if tts_api is not None:
+    if tts_api is not None or pipe is not None:
         if tts_api is not None:
             del tts_api
-
+        if pipe is not None:
+            del pipe
         gc.collect()
         torch.cuda.empty_cache()
         tts_api = None
+        pipe = None
 
     path_project = os.path.join(path_data, dataset_name)
 
@@ -432,38 +433,34 @@ def start_training(
         fp16 = ""
 
     cmd = (
-        f"accelerate launch {fp16} {file_train} --exp_name {exp_name}"
-        f" --learning_rate {learning_rate}"
-        f" --batch_size_per_gpu {batch_size_per_gpu}"
-        f" --batch_size_type {batch_size_type}"
-        f" --max_samples {max_samples}"
-        f" --grad_accumulation_steps {grad_accumulation_steps}"
-        f" --max_grad_norm {max_grad_norm}"
-        f" --epochs {epochs}"
-        f" --num_warmup_updates {num_warmup_updates}"
-        f" --save_per_updates {save_per_updates}"
-        f" --keep_last_n_checkpoints {keep_last_n_checkpoints}"
-        f" --last_per_updates {last_per_updates}"
-        f" --dataset_name {dataset_name}"
+        f"accelerate launch {fp16} {file_train} --exp_name {exp_name} "
+        f"--learning_rate {learning_rate} "
+        f"--batch_size_per_gpu {batch_size_per_gpu} "
+        f"--batch_size_type {batch_size_type} "
+        f"--max_samples {max_samples} "
+        f"--grad_accumulation_steps {grad_accumulation_steps} "
+        f"--max_grad_norm {max_grad_norm} "
+        f"--epochs {epochs} "
+        f"--num_warmup_updates {num_warmup_updates} "
+        f"--save_per_updates {save_per_updates} "
+        f"--last_per_steps {last_per_steps} "
+        f"--dataset_name {dataset_name}"
     )
 
     if finetune:
-        cmd += " --finetune"
+        cmd += f" --finetune {finetune}"
 
     if file_checkpoint_train != "":
-        cmd += f" --pretrain {file_checkpoint_train}"
+        cmd += f" --file_checkpoint_train {file_checkpoint_train}"
 
     if tokenizer_file != "":
         cmd += f" --tokenizer_path {tokenizer_file}"
 
-    cmd += f" --tokenizer {tokenizer_type}"
+    cmd += f" --tokenizer {tokenizer_type} "
 
-    cmd += f" --log_samples --logger {logger}"
+    cmd += f" --log_samples True --logger {logger} "
 
-    if ch_8bit_adam:
-        cmd += " --bnb_optimizer"
-
-    print("run command : \n" + cmd + "\n")
+    print(cmd)
 
     save_settings(
         dataset_name,
@@ -477,15 +474,13 @@ def start_training(
         epochs,
         num_warmup_updates,
         save_per_updates,
-        keep_last_n_checkpoints,
-        last_per_updates,
+        last_per_steps,
         finetune,
         file_checkpoint_train,
         tokenizer_type,
         tokenizer_file,
         mixed_precision,
         logger,
-        ch_8bit_adam,
     )
 
     try:
@@ -544,7 +539,7 @@ def start_training(
                         output = stdout_queue.get_nowait()
                         print(output, end="")
                         match = re.search(
-                            r"Epoch (\d+)/(\d+):\s+(\d+)%\|.*\[(\d+:\d+)<.*?loss=(\d+\.\d+), update=(\d+)", output
+                            r"Epoch (\d+)/(\d+):\s+(\d+)%\|.*\[(\d+:\d+)<.*?loss=(\d+\.\d+), step=(\d+)", output
                         )
                         if match:
                             current_epoch = match.group(1)
@@ -552,13 +547,13 @@ def start_training(
                             percent_complete = match.group(3)
                             elapsed_time = match.group(4)
                             loss = match.group(5)
-                            current_update = match.group(6)
+                            current_step = match.group(6)
                             message = (
                                 f"Epoch: {current_epoch}/{total_epochs}, "
                                 f"Progress: {percent_complete}%, "
                                 f"Elapsed Time: {elapsed_time}, "
                                 f"Loss: {loss}, "
-                                f"Update: {current_update}"
+                                f"Step: {current_step}"
                             )
                             yield message, gr.update(interactive=False), gr.update(interactive=True)
                         elif output.strip():
@@ -644,6 +639,27 @@ def create_data_project(name, tokenizer_type):
     os.makedirs(os.path.join(path_data, name, "dataset"), exist_ok=True)
     project_list, projects_selelect = get_list_projects()
     return gr.update(choices=project_list, value=name)
+
+
+def transcribe(file_audio, language="english"):
+    global pipe
+
+    if pipe is None:
+        pipe = pipeline(
+            "automatic-speech-recognition",
+            model="openai/whisper-large-v3-turbo",
+            torch_dtype=torch.float16,
+            device=device,
+        )
+
+    text_transcribe = pipe(
+        file_audio,
+        chunk_length_s=30,
+        batch_size=128,
+        generate_kwargs={"task": "transcribe", "language": language},
+        return_timestamps=False,
+    )["text"].strip()
+    return text_transcribe
 
 
 def transcribe_all(name_project, audio_files, language, user=False, progress=gr.Progress()):
@@ -742,9 +758,11 @@ def get_correct_audio_path(
     # Case 2: If it has a supported extension but is not a full path
     elif has_supported_extension(audio_input) and not os.path.isabs(audio_input):
         file_audio = os.path.join(base_path, audio_input)
+        print("2")
 
     # Case 3: If only the name is given (no extension and not a full path)
     elif not has_supported_extension(audio_input) and not os.path.isabs(audio_input):
+        print("3")
         for ext in supported_formats:
             potential_file = os.path.join(base_path, f"{audio_input}.{ext}")
             if os.path.exists(potential_file):
@@ -798,12 +816,9 @@ def create_metadata(name_project, ch_tokenizer, progress=gr.Progress()):
             continue
 
         if duration < 1 or duration > 25:
-            if duration > 25:
-                error_files.append([file_audio, "duration > 25 sec"])
-            if duration < 1:
-                error_files.append([file_audio, "duration < 1 sec "])
+            error_files.append([file_audio, "duration < 1 or > 25 "])
             continue
-        if len(text) < 3:
+        if len(text) < 4:
             error_files.append([file_audio, "very small text len 3"])
             continue
 
@@ -876,7 +891,7 @@ def calculate_train(
     learning_rate,
     num_warmup_updates,
     save_per_updates,
-    last_per_updates,
+    last_per_steps,
     finetune,
 ):
     path_project = os.path.join(path_data, name_project)
@@ -888,7 +903,7 @@ def calculate_train(
             max_samples,
             num_warmup_updates,
             save_per_updates,
-            last_per_updates,
+            last_per_steps,
             "project not found !",
             learning_rate,
         )
@@ -913,13 +928,6 @@ def calculate_train(
             gpu_properties = torch.cuda.get_device_properties(i)
             total_memory += gpu_properties.total_memory / (1024**3)  # in GB
 
-    elif torch.xpu.is_available():
-        gpu_count = torch.xpu.device_count()
-        total_memory = 0
-        for i in range(gpu_count):
-            gpu_properties = torch.xpu.get_device_properties(i)
-            total_memory += gpu_properties.total_memory / (1024**3)
-
     elif torch.backends.mps.is_available():
         gpu_count = 1
         total_memory = psutil.virtual_memory().available / (1024**3)
@@ -943,14 +951,14 @@ def calculate_train(
 
     num_warmup_updates = int(samples * 0.05)
     save_per_updates = int(samples * 0.10)
-    last_per_updates = int(save_per_updates * 0.25)
+    last_per_steps = int(save_per_updates * 0.25)
 
     max_samples = (lambda num: num + 1 if num % 2 != 0 else num)(max_samples)
     num_warmup_updates = (lambda num: num + 1 if num % 2 != 0 else num)(num_warmup_updates)
     save_per_updates = (lambda num: num + 1 if num % 2 != 0 else num)(save_per_updates)
-    last_per_updates = (lambda num: num + 1 if num % 2 != 0 else num)(last_per_updates)
-    if last_per_updates <= 0:
-        last_per_updates = 2
+    last_per_steps = (lambda num: num + 1 if num % 2 != 0 else num)(last_per_steps)
+    if last_per_steps <= 0:
+        last_per_steps = 2
 
     total_hours = hours
     mel_hop_length = 256
@@ -981,7 +989,7 @@ def calculate_train(
         max_samples,
         num_warmup_updates,
         save_per_updates,
-        last_per_updates,
+        last_per_steps,
         samples,
         learning_rate,
         int(epochs),
@@ -990,7 +998,7 @@ def calculate_train(
 
 def extract_and_save_ema_model(checkpoint_path: str, new_checkpoint_path: str, safetensors: bool) -> str:
     try:
-        checkpoint = torch.load(checkpoint_path, weights_only=True)
+        checkpoint = torch.load(checkpoint_path)
         print("Original Checkpoint Keys:", checkpoint.keys())
 
         ema_model_state_dict = checkpoint.get("ema_model_state_dict", None)
@@ -1099,9 +1107,7 @@ def vocab_extend(project_name, symbols, model_type):
     dataset_name = name_project.replace("_pinyin", "").replace("_char", "")
     new_ckpt_path = os.path.join(path_project_ckpts, dataset_name)
     os.makedirs(new_ckpt_path, exist_ok=True)
-
-    # Add pretrained_ prefix to model when copying for consistency with finetune_cli.py
-    new_ckpt_file = os.path.join(new_ckpt_path, "pretrained_model_1200000.pt")
+    new_ckpt_file = os.path.join(new_ckpt_path, "model_1200000.pt")
 
     size = expand_model_embeddings(ckpt_path, new_ckpt_file, num_new_tokens=vocab_size_new)
 
@@ -1183,10 +1189,7 @@ def get_random_sample_transcribe(project_name):
         sp = item.split("|")
         if len(sp) != 2:
             continue
-
-        # fixed audio when it is absolute
-        file_audio = get_correct_audio_path(sp[0], os.path.join(path_project, "wavs"))
-        list_data.append([file_audio, sp[1]])
+        list_data.append([os.path.join(path_project, "wavs", sp[0] + ".wav"), sp[1]])
 
     if list_data == []:
         return "", None
@@ -1205,9 +1208,7 @@ def get_random_sample_infer(project_name):
     )
 
 
-def infer(
-    project, file_checkpoint, exp_name, ref_text, ref_audio, gen_text, nfe_step, use_ema, speed, seed, remove_silence
-):
+def infer(project, file_checkpoint, exp_name, ref_text, ref_audio, gen_text, nfe_step, use_ema):
     global last_checkpoint, last_device, tts_api, last_ema
 
     if not os.path.isfile(file_checkpoint):
@@ -1237,17 +1238,8 @@ def infer(
         print("update >> ", device_test, file_checkpoint, use_ema)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        tts_api.infer(
-            gen_text=gen_text.lower().strip(),
-            ref_text=ref_text.lower().strip(),
-            ref_file=ref_audio,
-            nfe_step=nfe_step,
-            file_wave=f.name,
-            speed=speed,
-            seed=seed,
-            remove_silence=remove_silence,
-        )
-        return f.name, tts_api.device, str(tts_api.seed)
+        tts_api.infer(gen_text=gen_text, ref_text=ref_text, ref_file=ref_audio, nfe_step=nfe_step, file_wave=f.name)
+        return f.name, tts_api.device
 
 
 def check_finetune(finetune):
@@ -1261,22 +1253,12 @@ def get_checkpoints_project(project_name, is_gradio=True):
 
     if os.path.isdir(path_project_ckpts):
         files_checkpoints = glob(os.path.join(path_project_ckpts, project_name, "*.pt"))
-        # Separate pretrained and regular checkpoints
-        pretrained_checkpoints = [f for f in files_checkpoints if "pretrained_" in os.path.basename(f)]
-        regular_checkpoints = [
-            f
-            for f in files_checkpoints
-            if "pretrained_" not in os.path.basename(f) and "model_last.pt" not in os.path.basename(f)
-        ]
-        last_checkpoint = [f for f in files_checkpoints if "model_last.pt" in os.path.basename(f)]
-
-        # Sort regular checkpoints by number
-        regular_checkpoints = sorted(
-            regular_checkpoints, key=lambda x: int(os.path.basename(x).split("_")[1].split(".")[0])
+        files_checkpoints = sorted(
+            files_checkpoints,
+            key=lambda x: int(os.path.basename(x).split("_")[1].split(".")[0])
+            if os.path.basename(x) != "model_last.pt"
+            else float("inf"),
         )
-
-        # Combine in order: pretrained, regular, last
-        files_checkpoints = pretrained_checkpoints + regular_checkpoints + last_checkpoint
     else:
         files_checkpoints = []
 
@@ -1327,21 +1309,7 @@ def get_gpu_stats():
                 f"Allocated GPU memory (GPU {i}): {allocated_memory:.2f} MB\n"
                 f"Reserved GPU memory (GPU {i}): {reserved_memory:.2f} MB\n\n"
             )
-    elif torch.xpu.is_available():
-        gpu_count = torch.xpu.device_count()
-        for i in range(gpu_count):
-            gpu_name = torch.xpu.get_device_name(i)
-            gpu_properties = torch.xpu.get_device_properties(i)
-            total_memory = gpu_properties.total_memory / (1024**3)  # in GB
-            allocated_memory = torch.xpu.memory_allocated(i) / (1024**2)  # in MB
-            reserved_memory = torch.xpu.memory_reserved(i) / (1024**2)  # in MB
 
-            gpu_stats += (
-                f"GPU {i} Name: {gpu_name}\n"
-                f"Total GPU memory (GPU {i}): {total_memory:.2f} GB\n"
-                f"Allocated GPU memory (GPU {i}): {allocated_memory:.2f} MB\n"
-                f"Reserved GPU memory (GPU {i}): {reserved_memory:.2f} MB\n\n"
-            )
     elif torch.backends.mps.is_available():
         gpu_count = 1
         gpu_stats += "MPS GPU\n"
@@ -1538,7 +1506,6 @@ Skip this step if you have your dataset, raw.arrow, duration.json, and vocab.txt
      ```"""
             )
             ch_tokenizern = gr.Checkbox(label="Create Vocabulary", value=False, visible=False)
-
             bt_prepare = bt_create = gr.Button("Prepare")
             txt_info_prepare = gr.Text(label="Info", value="")
             txt_vocab_prepare = gr.Text(label="Vocab", value="")
@@ -1559,7 +1526,7 @@ Skip this step if you have your dataset, raw.arrow, duration.json, and vocab.txt
 
         with gr.TabItem("Train Data"):
             gr.Markdown("""```plaintext 
-The auto-setting is still experimental. Please make sure that the epochs, save per updates, and last per updates are set correctly, or change them manually as needed.
+The auto-setting is still experimental. Please make sure that the epochs, save per updates, and last per steps are set correctly, or change them manually as needed.
 If you encounter a memory error, try reducing the batch size per GPU to a smaller number.
 ```""")
             with gr.Row():
@@ -1590,17 +1557,9 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
             with gr.Row():
                 save_per_updates = gr.Number(label="Save per Updates", value=300)
-                keep_last_n_checkpoints = gr.Number(
-                    label="Keep Last N Checkpoints",
-                    value=-1,
-                    step=1,
-                    precision=0,
-                    info="-1: Keep all checkpoints, 0: Only save final model_last.pt, N>0: Keep last N checkpoints",
-                )
-                last_per_updates = gr.Number(label="Last per Updates", value=100)
+                last_per_steps = gr.Number(label="Last per Steps", value=100)
 
             with gr.Row():
-                ch_8bit_adam = gr.Checkbox(label="Use 8-bit Adam optimizer")
                 mixed_precision = gr.Radio(label="mixed_precision", choices=["none", "fp16", "bf16"], value="none")
                 cd_logger = gr.Radio(label="logger", choices=["wandb", "tensorboard"], value="wandb")
                 start_button = gr.Button("Start Training")
@@ -1608,47 +1567,41 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
             if projects_selelect is not None:
                 (
-                    exp_name_value,
-                    learning_rate_value,
-                    batch_size_per_gpu_value,
-                    batch_size_type_value,
-                    max_samples_value,
-                    grad_accumulation_steps_value,
-                    max_grad_norm_value,
-                    epochs_value,
-                    num_warmup_updates_value,
-                    save_per_updates_value,
-                    keep_last_n_checkpoints_value,
-                    last_per_updates_value,
-                    finetune_value,
-                    file_checkpoint_train_value,
-                    tokenizer_type_value,
-                    tokenizer_file_value,
-                    mixed_precision_value,
-                    logger_value,
-                    bnb_optimizer_value,
+                    exp_namev,
+                    learning_ratev,
+                    batch_size_per_gpuv,
+                    batch_size_typev,
+                    max_samplesv,
+                    grad_accumulation_stepsv,
+                    max_grad_normv,
+                    epochsv,
+                    num_warmupv_updatesv,
+                    save_per_updatesv,
+                    last_per_stepsv,
+                    finetunev,
+                    file_checkpoint_trainv,
+                    tokenizer_typev,
+                    tokenizer_filev,
+                    mixed_precisionv,
+                    cd_loggerv,
                 ) = load_settings(projects_selelect)
-
-                # Assigning values to the respective components
-                exp_name.value = exp_name_value
-                learning_rate.value = learning_rate_value
-                batch_size_per_gpu.value = batch_size_per_gpu_value
-                batch_size_type.value = batch_size_type_value
-                max_samples.value = max_samples_value
-                grad_accumulation_steps.value = grad_accumulation_steps_value
-                max_grad_norm.value = max_grad_norm_value
-                epochs.value = epochs_value
-                num_warmup_updates.value = num_warmup_updates_value
-                save_per_updates.value = save_per_updates_value
-                keep_last_n_checkpoints.value = keep_last_n_checkpoints_value
-                last_per_updates.value = last_per_updates_value
-                ch_finetune.value = finetune_value
-                file_checkpoint_train.value = file_checkpoint_train_value
-                tokenizer_type.value = tokenizer_type_value
-                tokenizer_file.value = tokenizer_file_value
-                mixed_precision.value = mixed_precision_value
-                cd_logger.value = logger_value
-                ch_8bit_adam.value = bnb_optimizer_value
+                exp_name.value = exp_namev
+                learning_rate.value = learning_ratev
+                batch_size_per_gpu.value = batch_size_per_gpuv
+                batch_size_type.value = batch_size_typev
+                max_samples.value = max_samplesv
+                grad_accumulation_steps.value = grad_accumulation_stepsv
+                max_grad_norm.value = max_grad_normv
+                epochs.value = epochsv
+                num_warmup_updates.value = num_warmupv_updatesv
+                save_per_updates.value = save_per_updatesv
+                last_per_steps.value = last_per_stepsv
+                ch_finetune.value = finetunev
+                file_checkpoint_train.value = file_checkpoint_trainv
+                tokenizer_type.value = tokenizer_typev
+                tokenizer_file.value = tokenizer_filev
+                mixed_precision.value = mixed_precisionv
+                cd_logger.value = cd_loggerv
 
             ch_stream = gr.Checkbox(label="Stream Output Experiment", value=True)
             txt_info_train = gr.Text(label="Info", value="")
@@ -1699,8 +1652,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     epochs,
                     num_warmup_updates,
                     save_per_updates,
-                    keep_last_n_checkpoints,
-                    last_per_updates,
+                    last_per_steps,
                     ch_finetune,
                     file_checkpoint_train,
                     tokenizer_type,
@@ -1708,7 +1660,6 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     mixed_precision,
                     ch_stream,
                     cd_logger,
-                    ch_8bit_adam,
                 ],
                 outputs=[txt_info_train, start_button, stop_button],
             )
@@ -1723,7 +1674,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     learning_rate,
                     num_warmup_updates,
                     save_per_updates,
-                    last_per_updates,
+                    last_per_steps,
                     ch_finetune,
                 ],
                 outputs=[
@@ -1731,7 +1682,7 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
                     max_samples,
                     num_warmup_updates,
                     save_per_updates,
-                    last_per_updates,
+                    last_per_steps,
                     lb_samples,
                     learning_rate,
                     epochs,
@@ -1744,26 +1695,25 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
             def setup_load_settings():
                 output_components = [
-                    exp_name,  # 1
-                    learning_rate,  # 2
-                    batch_size_per_gpu,  # 3
-                    batch_size_type,  # 4
-                    max_samples,  # 5
-                    grad_accumulation_steps,  # 6
-                    max_grad_norm,  # 7
-                    epochs,  # 8
-                    num_warmup_updates,  # 9
-                    save_per_updates,  # 10
-                    keep_last_n_checkpoints,  # 11
-                    last_per_updates,  # 12
-                    ch_finetune,  # 13
-                    file_checkpoint_train,  # 14
-                    tokenizer_type,  # 15
-                    tokenizer_file,  # 16
-                    mixed_precision,  # 17
-                    cd_logger,  # 18
-                    ch_8bit_adam,  # 19
+                    exp_name,
+                    learning_rate,
+                    batch_size_per_gpu,
+                    batch_size_type,
+                    max_samples,
+                    grad_accumulation_steps,
+                    max_grad_norm,
+                    epochs,
+                    num_warmup_updates,
+                    save_per_updates,
+                    last_per_steps,
+                    ch_finetune,
+                    file_checkpoint_train,
+                    tokenizer_type,
+                    tokenizer_file,
+                    mixed_precision,
+                    cd_logger,
                 ]
+
                 return output_components
 
             outputs = setup_load_settings()
@@ -1782,17 +1732,12 @@ If you encounter a memory error, try reducing the batch size per GPU to a smalle
 
         with gr.TabItem("Test Model"):
             gr.Markdown("""```plaintext 
-SOS: Check the use_ema setting (True or False) for your model to see what works best for you. use seed -1 from random
+SOS: Check the use_ema setting (True or False) for your model to see what works best for you. 
 ```""")
             exp_name = gr.Radio(label="Model", choices=["F5-TTS", "E2-TTS"], value="F5-TTS")
             list_checkpoints, checkpoint_select = get_checkpoints_project(projects_selelect, False)
 
-            with gr.Row():
-                nfe_step = gr.Number(label="NFE Step", value=32)
-                speed = gr.Slider(label="Speed", value=1.0, minimum=0.3, maximum=2.0, step=0.1)
-                seed = gr.Number(label="Seed", value=-1, minimum=-1)
-                remove_silence = gr.Checkbox(label="Remove Silence")
-
+            nfe_step = gr.Number(label="NFE Step", value=32)
             ch_use_ema = gr.Checkbox(label="Use EMA", value=True)
             with gr.Row():
                 cm_checkpoint = gr.Dropdown(
@@ -1812,27 +1757,14 @@ SOS: Check the use_ema setting (True or False) for your model to see what works 
 
             with gr.Row():
                 txt_info_gpu = gr.Textbox("", label="Device")
-                seed_info = gr.Text(label="Seed :")
                 check_button_infer = gr.Button("Infer")
 
             gen_audio = gr.Audio(label="Audio Gen", type="filepath")
 
             check_button_infer.click(
                 fn=infer,
-                inputs=[
-                    cm_project,
-                    cm_checkpoint,
-                    exp_name,
-                    ref_text,
-                    ref_audio,
-                    gen_text,
-                    nfe_step,
-                    ch_use_ema,
-                    speed,
-                    seed,
-                    remove_silence,
-                ],
-                outputs=[gen_audio, txt_info_gpu, seed_info],
+                inputs=[cm_project, cm_checkpoint, exp_name, ref_text, ref_audio, gen_text, nfe_step, ch_use_ema],
+                outputs=[gen_audio, txt_info_gpu],
             )
 
             bt_checkpoint_refresh.click(fn=get_checkpoints_project, inputs=[cm_project], outputs=[cm_checkpoint])

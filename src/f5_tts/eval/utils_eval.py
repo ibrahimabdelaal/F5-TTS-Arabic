@@ -2,7 +2,6 @@ import math
 import os
 import random
 import string
-from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -321,7 +320,7 @@ def run_asr_wer(args):
     from zhon.hanzi import punctuation
 
     punctuation_all = punctuation + string.punctuation
-    wer_results = []
+    wers = []
 
     from jiwer import compute_measures
 
@@ -336,8 +335,8 @@ def run_asr_wer(args):
             for segment in segments:
                 hypo = hypo + " " + segment.text
 
-        raw_truth = truth
-        raw_hypo = hypo
+        # raw_truth = truth
+        # raw_hypo = hypo
 
         for x in punctuation_all:
             truth = truth.replace(x, "")
@@ -361,16 +360,9 @@ def run_asr_wer(args):
         # dele = measures["deletions"] / len(ref_list)
         # inse = measures["insertions"] / len(ref_list)
 
-        wer_results.append(
-            {
-                "wav": Path(gen_wav).stem,
-                "truth": raw_truth,
-                "hypo": raw_hypo,
-                "wer": wer,
-            }
-        )
+        wers.append(wer)
 
-    return wer_results
+    return wers
 
 
 # SIM Evaluation
@@ -389,7 +381,7 @@ def run_sim(args):
         model = model.cuda(device)
     model.eval()
 
-    sims = []
+    sim_list = []
     for wav1, wav2, truth in tqdm(test_set):
         wav1, sr1 = torchaudio.load(wav1)
         wav2, sr2 = torchaudio.load(wav2)
@@ -408,6 +400,6 @@ def run_sim(args):
 
         sim = F.cosine_similarity(emb1, emb2)[0].item()
         # print(f"VSim score between two audios: {sim:.4f} (-1.0, 1.0).")
-        sims.append(sim)
+        sim_list.append(sim)
 
-    return sims
+    return sim_list

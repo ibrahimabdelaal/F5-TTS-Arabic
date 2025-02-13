@@ -2,8 +2,6 @@
 
 The pretrained model checkpoints can be reached at [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS) and [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), or will be automatically downloaded when running inference scripts.
 
-**More checkpoints with whole community efforts can be found in [SHARED.md](SHARED.md), supporting more languages.**
-
 Currently support **30s for a single** generation, which is the **total length** including both prompt and output audio. However, you can provide `infer_cli` and `infer_gradio` with longer text, will automatically do chunk generation. Long reference audio will be **clip short to ~15s**.
 
 To avoid possible inference failures, make sure you have seen through the following instructions.
@@ -12,8 +10,6 @@ To avoid possible inference failures, make sure you have seen through the follow
 - Uppercased letters will be uttered letter by letter, so use lowercased letters for normal words. 
 - Add some spaces (blank: " ") or punctuations (e.g. "," ".") to explicitly introduce some pauses.
 - Preprocess numbers to Chinese letters if you want to have them read in Chinese, otherwise in English.
-- If the generation output is blank (pure silence), check for ffmpeg installation (various tutorials online, blogs, videos, etc.).
-- Try turn off use_ema if using an early-stage finetuned checkpoint (which goes just few updates).
 
 
 ## Gradio App
@@ -64,9 +60,6 @@ f5-tts_infer-cli \
 # Choose Vocoder
 f5-tts_infer-cli --vocoder_name bigvgan --load_vocoder_from_local --ckpt_file <YOUR_CKPT_PATH, eg:ckpts/F5TTS_Base_bigvgan/model_1250000.pt>
 f5-tts_infer-cli --vocoder_name vocos --load_vocoder_from_local --ckpt_file <YOUR_CKPT_PATH, eg:ckpts/F5TTS_Base/model_1200000.safetensors>
-
-# More instructions
-f5-tts_infer-cli --help
 ```
 
 And a `.toml` file would help with more flexible usage.

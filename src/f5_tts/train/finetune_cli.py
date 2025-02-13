@@ -13,9 +13,6 @@ from importlib.resources import files
 target_sample_rate = 24000
 n_mel_channels = 100
 hop_length = 256
-win_length = 1024
-n_fft = 1024
-mel_spec_type = "vocos"  # 'vocos' or 'bigvgan'
 
 
 # -------------------------- Argument Parsing --------------------------- #
@@ -27,7 +24,7 @@ def parse_args():
 
     # num_warmup_updates = 300 for 5000 sample about 10 hours
 
-    # change save_per_updates , last_per_updates change this value what you need  ,
+    # change save_per_updates , last_per_steps change this value what you need  ,
 
     parser = argparse.ArgumentParser(description="Train CFM Model")
 
@@ -43,17 +40,11 @@ def parse_args():
     parser.add_argument("--max_samples", type=int, default=64, help="Max sequences per batch")
     parser.add_argument("--grad_accumulation_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
-    parser.add_argument("--num_warmup_updates", type=int, default=300, help="Warmup updates")
-    parser.add_argument("--save_per_updates", type=int, default=10000, help="Save checkpoint every X updates")
-    parser.add_argument(
-        "--keep_last_n_checkpoints",
-        type=int,
-        default=-1,
-        help="-1 to keep all, 0 to not save intermediate, > 0 to keep last N checkpoints",
-    )
-    parser.add_argument("--last_per_updates", type=int, default=50000, help="Save last checkpoint every X updates")
-    parser.add_argument("--finetune", action="store_true", help="Use Finetune")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--num_warmup_updates", type=int, default=300, help="Warmup steps")
+    parser.add_argument("--save_per_updates", type=int, default=10000, help="Save checkpoint every X steps")
+    parser.add_argument("--last_per_steps", type=int, default=50000, help="Save last checkpoint every X steps")
+    parser.add_argument("--finetune", type=bool, default=True, help="Use Finetune")
     parser.add_argument("--pretrain", type=str, default=None, help="the path to the checkpoint")
     parser.add_argument(
         "--tokenizer", type=str, default="pinyin", choices=["pinyin", "char", "custom"], help="Tokenizer type"
@@ -64,17 +55,14 @@ def parse_args():
         default=None,
         help="Path to custom tokenizer vocab file (only used if tokenizer = 'custom')",
     )
+
     parser.add_argument(
         "--log_samples",
-        action="store_true",
-        help="Log inferenced samples per ckpt save updates",
+        type=bool,
+        default=False,
+        help="Log inferenced samples per ckpt save steps",
     )
     parser.add_argument("--logger", type=str, default=None, choices=["wandb", "tensorboard"], help="logger")
-    parser.add_argument(
-        "--bnb_optimizer",
-        action="store_true",
-        help="Use 8-bit Adam optimizer from bitsandbytes",
-    )
 
     return parser.parse_args()
 
@@ -111,10 +99,7 @@ def main():
         if not os.path.isdir(checkpoint_path):
             os.makedirs(checkpoint_path, exist_ok=True)
 
-        file_checkpoint = os.path.basename(ckpt_path)
-        if not file_checkpoint.startswith("pretrained_"):  # Change: Add 'pretrained_' prefix to copied model
-            file_checkpoint = "pretrained_" + file_checkpoint
-        file_checkpoint = os.path.join(checkpoint_path, file_checkpoint)
+        file_checkpoint = os.path.join(checkpoint_path, os.path.basename(ckpt_path))
         if not os.path.isfile(file_checkpoint):
             shutil.copy2(ckpt_path, file_checkpoint)
             print("copy checkpoint for finetune")
@@ -131,15 +116,11 @@ def main():
     vocab_char_map, vocab_size = get_tokenizer(tokenizer_path, tokenizer)
 
     print("\nvocab : ", vocab_size)
-    print("\nvocoder : ", mel_spec_type)
 
     mel_spec_kwargs = dict(
-        n_fft=n_fft,
-        hop_length=hop_length,
-        win_length=win_length,
-        n_mel_channels=n_mel_channels,
         target_sample_rate=target_sample_rate,
-        mel_spec_type=mel_spec_type,
+        n_mel_channels=n_mel_channels,
+        hop_length=hop_length,
     )
 
     model = CFM(
@@ -154,7 +135,6 @@ def main():
         args.learning_rate,
         num_warmup_updates=args.num_warmup_updates,
         save_per_updates=args.save_per_updates,
-        keep_last_n_checkpoints=args.keep_last_n_checkpoints,
         checkpoint_path=checkpoint_path,
         batch_size=args.batch_size_per_gpu,
         batch_size_type=args.batch_size_type,
@@ -166,8 +146,7 @@ def main():
         wandb_run_name=args.exp_name,
         wandb_resume_id=wandb_resume_id,
         log_samples=args.log_samples,
-        last_per_updates=args.last_per_updates,
-        bnb_optimizer=args.bnb_optimizer,
+        last_per_steps=args.last_per_steps,
     )
 
     train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
