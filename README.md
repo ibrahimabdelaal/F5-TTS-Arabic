@@ -8,8 +8,9 @@
 
 ### Thanks to all the contributors !
 
-## News
-Spanish model: https://huggingface.co/jpgallegoar/F5-Spanish/
+## Arabic model 
+   https://huggingface.co/IbrahimSalah/F5-TTS-Arabic
+
 
 ## Installation
 
