@@ -337,10 +337,11 @@ with gr.Blocks() as app_multistyle:
 
     # Text input for the prompt
     gen_text_input_multistyle = gr.Textbox(
-        label="Texto para Generar",
-        lines=10,
-        placeholder="Ingresa el guion con los nombres de los hablantes (o tipos de emociones) al inicio de cada bloque, por ejemplo:\n\n{Regular} Hola, me gustaría pedir un sándwich, por favor.\n{Sorprendido} ¿Qué quieres decir con que no tienen pan?\n{Triste} Realmente quería un sándwich...\n{Enojado} ¡Sabes qué, maldición a ti y a tu pequeña tienda!\n{Susurro} Solo volveré a casa y lloraré ahora.\n{Gritando} ¿Por qué yo?!",
-    )
+    label="نص التوليد",
+    lines=10,
+    placeholder="مرحبًا، أود طلب كوب من القهوة، من فضلك.",
+)
+
 
     def make_insert_speech_type_fn(index):
         def insert_speech_type_fn(current_text, speech_type_name):
@@ -362,17 +363,17 @@ with gr.Blocks() as app_multistyle:
     # Model choice
     model_choice_multistyle = gr.Radio(choices=["F5-TTS"], label="Seleccionar Modelo TTS", value="F5-TTS")
 
-    with gr.Accordion("Configuraciones Avanzadas", open=False):
+    with gr.Accordion("الإعدادات المتقدمة", open=False):
         remove_silence_multistyle = gr.Checkbox(
-            label="Eliminar Silencios",
+            label="إزالة الصمت",
             value=False,
         )
 
-    # Generate button
-    generate_multistyle_btn = gr.Button("Generar Habla Multi-Estilo", variant="primary")
+    # زر التوليد
+    generate_multistyle_btn = gr.Button("توليد الكلام", variant="primary")
 
-    # Output audio
-    audio_output_multistyle = gr.Audio(label="Audio Sintetizado")
+    # إخراج الصوت
+    audio_output_multistyle = gr.Audio(label="الصوت المُولّد")
 
     @gpu_decorator
     def generate_multistyle_speech(
@@ -487,17 +488,17 @@ with gr.Blocks() as app_multistyle:
 with gr.Blocks() as app_chat:
     gr.Markdown(
         """
-# Chat de Voz
-¡Mantén una conversación con una IA usando tu voz de referencia! 
-1. Sube un clip de audio de referencia y opcionalmente su transcripción.
-2. Carga el modelo de chat.
-3. Graba tu mensaje a través de tu micrófono.
-4. La IA responderá usando la voz de referencia.
+# محادثة صوتية  
+تحدث مع الذكاء الاصطناعي باستخدام صوتك المرجعي!  
+1. قم برفع مقطع صوتي مرجعي، مع إمكانية إضافة النص المكتوب.  
+2. حمل نموذج المحادثة.  
+3. سجل رسالتك باستخدام الميكروفون.  
+4. سيرد الذكاء الاصطناعي باستخدام الصوت المرجعي.  
 """
     )
 
     if not USING_SPACES:
-        load_chat_model_btn = gr.Button("Cargar Modelo de Chat", variant="primary")
+        load_chat_model_btn = gr.Button("تحميل نموذج المحادثة", variant="primary")
 
         chat_interface_container = gr.Column(visible=False)
 
@@ -506,13 +507,13 @@ with gr.Blocks() as app_chat:
             global chat_model_state, chat_tokenizer_state
             if chat_model_state is None:
                 show_info = gr.Info
-                show_info("Cargando modelo de chat...")
+                show_info("جارٍ تحميل نموذج المحادثة...")
                 model_name = "Qwen/Qwen2.5-3B-Instruct"
                 chat_model_state = AutoModelForCausalLM.from_pretrained(
                     model_name, torch_dtype="auto", device_map="auto"
                 )
                 chat_tokenizer_state = AutoTokenizer.from_pretrained(model_name)
-                show_info("Modelo de chat cargado.")
+                show_info("تم تحميل نموذج المحادثة بنجاح.")
 
             return gr.update(visible=False), gr.update(visible=True)
 
@@ -529,51 +530,51 @@ with gr.Blocks() as app_chat:
     with chat_interface_container:
         with gr.Row():
             with gr.Column():
-                ref_audio_chat = gr.Audio(label="Audio de Referencia", type="filepath")
+                ref_audio_chat = gr.Audio(label="الصوت المرجعي", type="filepath")
             with gr.Column():
-                with gr.Accordion("Configuraciones Avanzadas", open=False):
+                with gr.Accordion("إعدادات متقدمة", open=False):
                     model_choice_chat = gr.Radio(
                         choices=["F5-TTS"],
-                        label="Modelo TTS",
+                        label="نموذج تحويل النص إلى كلام",
                         value="F5-TTS",
                     )
                     remove_silence_chat = gr.Checkbox(
-                        label="Eliminar Silencios",
+                        label="إزالة الصمت",
                         value=True,
                     )
                     ref_text_chat = gr.Textbox(
-                        label="Texto de Referencia",
-                        info="Opcional: Deja en blanco para transcribir automáticamente",
+                        label="النص المرجعي",
+                        info="اختياري: اتركه فارغًا ليتم تحويل الصوت إلى نص تلقائيًا",
                         lines=2,
                     )
                     system_prompt_chat = gr.Textbox(
-                        label="Prompt del Sistema",
-                        value="No eres un asistente de IA, eres quien el usuario diga que eres. Debes mantenerte en personaje. Mantén tus respuestas concisas ya que serán habladas en voz alta.",
+                        label="توجيه النظام",
+                        value="أنت لست مساعدًا ذكياً، أنت الشخص الذي يحدده المستخدم. يجب أن تحافظ على شخصيتك ولا تخرج عن الدور. اجعل إجاباتك قصيرة لأنها ستنطق بصوت عالٍ.",
                         lines=2,
                     )
 
-        chatbot_interface = gr.Chatbot(label="Conversación")
+        chatbot_interface = gr.Chatbot(label="المحادثة")
 
         with gr.Row():
             with gr.Column():
                 audio_input_chat = gr.Microphone(
-                    label="Habla tu mensaje",
+                    label="تحدث الآن",
                     type="filepath",
                 )
                 audio_output_chat = gr.Audio(autoplay=True)
             with gr.Column():
                 text_input_chat = gr.Textbox(
-                    label="Escribe tu mensaje",
+                    label="أدخل رسالتك",
                     lines=1,
                 )
-                send_btn_chat = gr.Button("Enviar")
-                clear_btn_chat = gr.Button("Limpiar Conversación")
+                send_btn_chat = gr.Button("إرسال")
+                clear_btn_chat = gr.Button("مسح المحادثة")
 
         conversation_state = gr.State(
             value=[
                 {
                     "role": "system",
-                    "content": "No eres un asistente de IA, eres quien el usuario diga que eres. Debes mantenerte en personaje. Mantén tus respuestas concisas ya que serán habladas en voz alta.",
+                    "content": "أنت لست مساعدًا ذكياً، أنت الشخص الذي يحدده المستخدم. يجب أن تحافظ على شخصيتك ولا تخرج عن الدور. اجعل إجاباتك قصيرة لأنها ستنطق بصوت عالٍ.",
                 }
             ]
         )
@@ -625,11 +626,11 @@ with gr.Blocks() as app_chat:
             return audio_result
 
         def clear_conversation():
-            """Reset the conversation"""
+            """إعادة تعيين المحادثة"""
             return [], [
                 {
                     "role": "system",
-                    "content": "No eres un asistente de IA, eres quien el usuario diga que eres. Debes mantenerte en personaje. Mantén tus respuestas concisas ya que serán habladas en voz alta.",
+                    "content": "أنت لست مساعدًا ذكياً، أنت الشخص الذي يحدده المستخدم. يجب أن تحافظ على شخصيتك ولا تخرج عن الدور. اجعل إجاباتك قصيرة لأنها ستنطق بصوت عالٍ.",
                 }
             ]
 
