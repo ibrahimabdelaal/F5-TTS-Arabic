@@ -137,6 +137,7 @@ def initialize_asr_pipeline(device=device, dtype=None):
 
 
 def load_checkpoint(model, ckpt_path, device, dtype=None, use_ema=False):
+    use_ema=False
     if dtype is None:
         dtype = (
             torch.float16 if device == "cuda" and torch.cuda.get_device_properties(device).major >= 6 else torch.float32
@@ -214,7 +215,7 @@ def load_model(
     ).to(device)
 
     dtype = torch.float32 if mel_spec_type == "bigvgan" else None
-    model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
+    model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=False)
 
     return model
 
@@ -379,7 +380,7 @@ def infer_batch_process(
     progress=tqdm,
     target_rms=0.1,
     cross_fade_duration=0.15,
-    nfe_step=32,
+    nfe_step=60,
     cfg_strength=2.0,
     sway_sampling_coef=-1,
     speed=1,
