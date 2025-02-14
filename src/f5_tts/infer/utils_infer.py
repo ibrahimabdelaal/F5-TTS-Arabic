@@ -47,7 +47,7 @@ ode_method = "euler"
 nfe_step = 60  # 16, 32
 cfg_strength = 2.0
 sway_sampling_coef = -1.0
-speed = .7
+speed = 1.0
 fix_duration = None
 
 # -----------------------------------------
@@ -136,7 +136,7 @@ def initialize_asr_pipeline(device=device, dtype=None):
 # load model checkpoint for inference
 
 
-def load_checkpoint(model, ckpt_path, device, dtype=None, use_ema=True):
+def load_checkpoint(model, ckpt_path, device, dtype=None, use_ema=False):
     if dtype is None:
         dtype = (
             torch.float16 if device == "cuda" and torch.cuda.get_device_properties(device).major >= 6 else torch.float32
@@ -185,7 +185,7 @@ def load_model(
     mel_spec_type=mel_spec_type,
     vocab_file=str(cached_path("hf://IbrahimSalah/F5-TTS-Arabic/vocab.txt")),
     ode_method=ode_method,
-    use_ema=True,
+    use_ema=False,
     device=device,
 ):
     if vocab_file == "":
@@ -285,7 +285,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
 
     global _ref_audio_cache 
     a=0
-    if audio_hash in _ref_audio_cache and a==1:
+    if audio_hash in _ref_audio_cache :
         # Use cached reference text
         show_info("Using cached reference text...")
         ref_text = _ref_audio_cache[audio_hash]

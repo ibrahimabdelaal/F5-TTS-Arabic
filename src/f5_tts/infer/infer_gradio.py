@@ -140,7 +140,7 @@ with gr.Blocks() as app_credits:
 
 
 with gr.Blocks() as app_tts:
-    gr.Markdown("# TTS بالكتل")
+    gr.Markdown("# TTS ")
     ref_audio_input = gr.Audio(label="الصوت المرجعى", type="filepath")
     gen_text_input = gr.Textbox(label="الكلام المراد تجويله", lines=10)
     model_choice = gr.Radio(choices=["F5-TTS"], label="اختر نموذج TTS", value="F5-TTS")
