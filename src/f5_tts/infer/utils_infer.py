@@ -245,6 +245,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
         show_info("Converting audio...")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
             temp_files.append(f.name)
+            show_info(f"Temporary file created: {f.name}")
             aseg = AudioSegment.from_file(ref_audio_orig)
 
             if clip_short:
@@ -280,6 +281,7 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
 
             aseg = remove_silence_edges(aseg) + AudioSegment.silent(duration=50)
             aseg.export(f.name, format="wav")
+            show_info(f"Exported processed audio to: {f.name}")
             ref_audio = f.name
 
         # Compute hash of both audio data and any provided reference text
@@ -327,8 +329,9 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
         for temp_file in temp_files:
             try:
                 os.remove(temp_file)
-            except:
-                pass
+                show_info(f"Removed temporary file: {temp_file}")
+            except Exception as e:
+                show_info(f"Error removing temp file {temp_file}: {str(e)}")
 
 
 # infer process: chunk text -> infer batches [i.e. infer_batch_process()]
