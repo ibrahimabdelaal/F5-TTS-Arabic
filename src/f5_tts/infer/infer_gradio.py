@@ -44,7 +44,7 @@ vocoder = load_vocoder()
 # load models
 F5TTS_model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
 F5TTS_ema_model = load_model(
-    DiT, F5TTS_model_cfg, str(cached_path("hf://IbrahimSalah/F5-TTS-Arabic/model_235000.pt"))
+    DiT, F5TTS_model_cfg, str(cached_path("hf://IbrahimSalah/F5-TTS-Arabic/model_380000.pt"))
 )
 
 chat_model_state = None
