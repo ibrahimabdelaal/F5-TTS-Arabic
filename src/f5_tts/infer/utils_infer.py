@@ -186,6 +186,7 @@ def transcribe(ref_audio, language=None):
 
 
 def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
+    use_ema=False
     if dtype is None:
         dtype = (
             torch.float16
@@ -240,9 +241,10 @@ def load_model(
     mel_spec_type=mel_spec_type,
     vocab_file="",
     ode_method=ode_method,
-    use_ema=True,
+    use_ema=False,
     device=device,
 ):
+     use_ema=False
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
     tokenizer = "custom"
