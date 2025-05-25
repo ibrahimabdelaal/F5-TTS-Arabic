@@ -31,6 +31,62 @@ from f5_tts.infer.utils_infer import (
 )
 
 
+def smart_text_split(text, max_length=200):
+    """
+    Intelligently split text into chunks while preserving context.
+    Priority: sentences (.) > clauses (,;:) > phrases (?) > words
+    """
+    if len(text) <= max_length:
+        return [text]
+    
+    chunks = []
+    remaining_text = text.strip()
+    
+    while remaining_text:
+        if len(remaining_text) <= max_length:
+            chunks.append(remaining_text)
+            break
+            
+        # Find the best split point within max_length
+        chunk = remaining_text[:max_length]
+        split_point = -1
+        
+        # Priority 1: Look for sentence endings (. ! ?)
+        sentence_endings = ['.', '!', '?']
+        for i in range(len(chunk) - 1, max(0, max_length - 50), -1):
+            if chunk[i] in sentence_endings and i < len(chunk) - 1 and chunk[i + 1] == ' ':
+                split_point = i + 1
+                break
+        
+        # Priority 2: Look for clause separators (, ; :)
+        if split_point == -1:
+            clause_separators = [',', ';', ':']
+            for i in range(len(chunk) - 1, max(0, max_length - 30), -1):
+                if chunk[i] in clause_separators and i < len(chunk) - 1 and chunk[i + 1] == ' ':
+                    split_point = i + 1
+                    break
+        
+        # Priority 3: Look for word boundaries (spaces)
+        if split_point == -1:
+            for i in range(len(chunk) - 1, max(0, max_length - 20), -1):
+                if chunk[i] == ' ':
+                    split_point = i + 1
+                    break
+        
+        # Fallback: Split at max_length if no good split point found
+        if split_point == -1:
+            split_point = max_length
+        
+        # Add the chunk and continue with remaining text
+        current_chunk = remaining_text[:split_point].strip()
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        remaining_text = remaining_text[split_point:].strip()
+    
+    return chunks
+
+
 parser = argparse.ArgumentParser(
     prog="python3 infer-cli.py",
     description="Commandline interface for E2/F5 TTS with Advanced Batch Processing.",
@@ -168,6 +224,12 @@ parser.add_argument(
     type=str,
     help="Specify the device to run on",
 )
+parser.add_argument(
+    "--max_text_length",
+    type=int,
+    default=200,
+    help="Maximum length of text chunks for generation (default: 200)",
+)
 args = parser.parse_args()
 
 
@@ -209,6 +271,7 @@ sway_sampling_coef = args.sway_sampling_coef or config.get("sway_sampling_coef",
 speed = args.speed or config.get("speed", speed)
 fix_duration = args.fix_duration or config.get("fix_duration", fix_duration)
 device = args.device or config.get("device", device)
+max_text_length = args.max_text_length or config.get("max_text_length", 200)
 
 
 # patches for pip pkg user
@@ -306,6 +369,9 @@ def main():
     reg1 = r"(?=\[\w+\])"
     chunks = re.split(reg1, gen_text)
     reg2 = r"\[(\w+)\]"
+    
+    chunk_counter = 0
+    
     for text in chunks:
         if not text.strip():
             continue
@@ -319,38 +385,58 @@ def main():
             print(f"Voice {voice} not found, using main.")
             voice = "main"
         text = re.sub(reg2, "", text)
-        ref_audio_ = voices[voice]["ref_audio"]
-        ref_text_ = voices[voice]["ref_text"]
-        gen_text_ = text.strip()
+        
+        # Smart text splitting for long texts
+        text_chunks = smart_text_split(text.strip(), max_text_length)
+        
         print(f"Voice: {voice}")
-        audio_segment, final_sample_rate, spectrogram = infer_process(
-            ref_audio_,
-            ref_text_,
-            gen_text_,
-            ema_model,
-            vocoder,
-            mel_spec_type=vocoder_name,
-            target_rms=target_rms,
-            cross_fade_duration=cross_fade_duration,
-            nfe_step=nfe_step,
-            cfg_strength=cfg_strength,
-            sway_sampling_coef=sway_sampling_coef,
-            speed=speed,
-            fix_duration=fix_duration,
-            device=device,
-        )
-        generated_audio_segments.append(audio_segment)
-
-        if save_chunk:
-            if len(gen_text_) > 200:
-                gen_text_ = gen_text_[:200] + " ... "
-            sf.write(
-                os.path.join(output_chunk_dir, f"{len(generated_audio_segments) - 1}_{gen_text_}.wav"),
-                audio_segment,
-                final_sample_rate,
+        if len(text_chunks) > 1:
+            print(f"Text split into {len(text_chunks)} chunks for better processing")
+        
+        for i, gen_text_ in enumerate(text_chunks):
+            if not gen_text_.strip():
+                continue
+                
+            ref_audio_ = voices[voice]["ref_audio"]
+            ref_text_ = voices[voice]["ref_text"]
+            
+            print(f"Processing chunk {i+1}/{len(text_chunks)}: {gen_text_[:50]}...")
+            
+            audio_segment, final_sample_rate, spectrogram = infer_process(
+                ref_audio_,
+                ref_text_,
+                gen_text_,
+                ema_model,
+                vocoder,
+                mel_spec_type=vocoder_name,
+                target_rms=target_rms,
+                cross_fade_duration=cross_fade_duration,
+                nfe_step=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_sampling_coef=sway_sampling_coef,
+                speed=speed,
+                fix_duration=fix_duration,
+                device=device,
             )
+            generated_audio_segments.append(audio_segment)
+
+            if save_chunk:
+                chunk_text_for_filename = gen_text_
+                if len(chunk_text_for_filename) > 100:
+                    chunk_text_for_filename = chunk_text_for_filename[:100] + "..."
+                # Remove invalid filename characters
+                chunk_text_for_filename = re.sub(r'[<>:"/\\|?*]', '_', chunk_text_for_filename)
+                
+                sf.write(
+                    os.path.join(output_chunk_dir, f"{chunk_counter:03d}_{voice}_{chunk_text_for_filename}.wav"),
+                    audio_segment,
+                    final_sample_rate,
+                )
+            
+            chunk_counter += 1
 
     if generated_audio_segments:
+        print(f"\nConcatenating {len(generated_audio_segments)} audio segments...")
         final_wave = np.concatenate(generated_audio_segments)
 
         if not os.path.exists(output_dir):
@@ -361,7 +447,7 @@ def main():
             # Remove silence
             if remove_silence:
                 remove_silence_for_generated_wav(f.name)
-            print(f.name)
+            print(f"Final audio saved to: {f.name}")
 
 
 if __name__ == "__main__":
