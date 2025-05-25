@@ -244,7 +244,7 @@ def load_model(
     use_ema=False,
     device=device,
 ):
-     use_ema=False
+    use_ema=False
     if vocab_file == "":
         vocab_file = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
     tokenizer = "custom"
